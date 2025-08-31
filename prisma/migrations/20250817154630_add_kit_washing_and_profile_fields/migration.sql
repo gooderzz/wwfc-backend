@@ -1,0 +1,11 @@
+-- AlterTable
+ALTER TABLE "PlayerStats" ADD COLUMN     "kitWash" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "redCards" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "subMinutes" INTEGER,
+ADD COLUMN     "yellowCards" INTEGER NOT NULL DEFAULT 0;
+
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN     "hasCar" BOOLEAN,
+ADD COLUMN     "hasKit" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "location" TEXT,
+ADD COLUMN     "totalKitWashes" INTEGER NOT NULL DEFAULT 0;

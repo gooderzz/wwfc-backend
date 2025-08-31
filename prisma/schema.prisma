@@ -1,0 +1,924 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// @seed="node prisma/seed.js"
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// @seed="node prisma/seed.js"
+model User {
+  id           Int           @id @default(autoincrement())
+  name         String
+  email        String        @unique
+  passwordHash String
+  role         Role
+  status       UserStatus    @default(ACTIVE)
+  team         Team?         @relation(fields: [teamId], references: [id])
+  teamId       Int?
+  primaryPosition   Position? @relation("PrimaryPosition", fields: [primaryPositionId], references: [id])
+  primaryPositionId Int?
+  secondaryPosition Position? @relation("SecondaryPosition", fields: [secondaryPositionId], references: [id])
+  secondaryPositionId Int?
+  rsvps        FixtureRSVP[]
+  playerStats  PlayerStats[]
+  fantasyValue Float         @default(0)
+  // Enhanced Profile Fields
+  profilePhoto String?       // URL to profile photo
+  bio         String?        // Player bio/description
+  dateOfBirth DateTime?      // For age calculation
+  height      Int?           // Height in cm
+  weight      Int?           // Weight in kg
+  preferredFoot String?      // LEFT, RIGHT, BOTH
+  jerseyNumber Int?          // Preferred jersey number
+  // Additional Profile Fields
+  hasCar Boolean?           // Whether player has a car for transport
+  location String?          // Player's location/area
+  // Career Statistics (aggregated from PlayerStats)
+  totalGoals      Int        @default(0)
+  totalAssists    Int        @default(0)
+  totalCleanSheets Int       @default(0)
+  totalAppearances Int       @default(0)
+  totalMinutes    Int        @default(0)
+  // Kit washing tracking
+  totalKitWashes  Int        @default(0)
+  hasKit          Boolean    @default(false) // Whether player currently has the kit
+  // Achievement tracking
+  achievements    Achievement[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  bonusVotes   BonusVote[]
+  // Communication Hub relations
+  posts       Post[]    @relation("PostAuthor")
+  comments    Comment[] @relation("CommentAuthor")
+  reactions   Reaction[] @relation("ReactionUser")
+  // Trialist specific fields
+  trialistRatings TrialistRating[] @relation("TrialistRatings")
+  // Manager ratings for trialists
+  managerRatings ManagerRating[] @relation("ManagerRatings")
+  // As manager rating trialists
+  trialistRatingsAsManager TrialistRating[] @relation("ManagerRatings")
+  // As trialist being rated by managers
+  managerRatingsAsTrialist ManagerRating[] @relation("TrialistRatings")
+  // Scraping logs initiated by this user
+  scrapingLogs ScrapingLog[]
+  matchEvents  MatchEvent[]  // NEW: Player's match events
+  goalAssists  MatchEvent[]  @relation("GoalAssists") // NEW: Goals this player assisted
+  substitutions MatchEvent[] @relation("Substitutions") // NEW: Substitutions involving this player
+  // Calendar & RSVP System relations
+  createdEvents Event[] @relation("EventCreator")
+  eventRSVPs EventRSVP[]
+  eventAttendance EventAttendance[]
+  eventInvitations EventInvitation[]
+  markedAttendance EventAttendance[] @relation("AttendanceMarker")
+  // Financial Tracking System relations
+  payments      PaymentRecord[]
+  userBalance   UserBalance?
+  discountEligibility DiscountEligibility[]
+  markedPayments PaymentRecord[] @relation("PaymentMarker")
+  verifiedDiscounts DiscountEligibility[] @relation("DiscountVerifier")
+}
+
+enum Role {
+  TRIALIST
+  PLAYER
+  MANAGER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  RETIRED
+  REJECTED
+  PROMOTED
+  INJURED
+}
+
+model Position {
+  id          Int     @id @default(autoincrement())
+  name        String  @unique
+  description String?
+  // Relations
+  primaryUsers    User[] @relation("PrimaryPosition")
+  secondaryUsers  User[] @relation("SecondaryPosition")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model TrialistRating {
+  id        String   @id @default(uuid())
+  trialist  User     @relation("TrialistRatings", fields: [trialistId], references: [id])
+  trialistId Int
+  manager   User     @relation("ManagerRatings", fields: [managerId], references: [id])
+  managerId Int
+  rating    Int      // 1-10 rating
+  interested Boolean @default(false)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([trialistId, managerId])
+}
+
+model ManagerRating {
+  id        String   @id @default(uuid())
+  manager   User     @relation("ManagerRatings", fields: [managerId], references: [id])
+  managerId Int
+  trialist  User     @relation("TrialistRatings", fields: [trialistId], references: [id])
+  trialistId Int
+  rating    Int      // 1-10 rating
+  interested Boolean @default(false)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([managerId, trialistId])
+}
+
+model Team {
+  id        Int       @id @default(autoincrement())
+  name      String
+  division  String
+  slug      String   @unique
+  homeAddress String? // Home ground address for auto-population
+  scrapedTeamId Int?  // Link to scraped team (legacy)
+  users     User[]
+  fixtures  Fixture[]
+  posts     Post[]
+  scrapedTeam ScrapedTeam? @relation(fields: [scrapedTeamId], references: [id])
+  teamIdentity TeamIdentity? @relation(fields: [teamIdentityId], references: [id])
+  teamIdentityId Int? @unique
+  divisionChanges DivisionChangeLog[]
+  formationStats FormationStats[] // Formation statistics for this team
+  events Event[] // Calendar & RSVP System events
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Fixture {
+  id        Int           @id @default(autoincrement())
+  fixtureType FixtureType @default(LEAGUE)
+  opponent  String
+  cupName   String?       // For cup fixtures
+  date      DateTime
+  kickOffTime DateTime    // Separate kick-off time
+  location  Location      @default(HOME)
+  address   String?       // Full address (Google Maps compatible)
+  team      Team          @relation(fields: [teamId], references: [id])
+  teamId    Int
+  seasonId  String        @default("965423047") // Current season
+  rsvps     FixtureRSVP[]
+  homeGoals Int?
+  awayGoals Int?
+  isPlayed  Boolean       @default(false)
+  resultType ResultType?  // NEW: Type of result (actual game, walkover, postponement)
+  walkoverType WalkoverType? // NEW: If walkover, which team won
+  postponementReason String? // NEW: Reason for postponement
+  totalSaves Int?         // NEW: Total saves for the team
+  plannedFormationId String? // Formation from team selection
+  actualFormationId String? // Formation used in the actual game
+  formationChanged Boolean? // Whether formation changed from planned to actual
+  playerStats PlayerStats[]
+  teamSelection TeamSelection? // Planned team selection
+  actualTeamSelection ActualTeamSelection? // What actually played
+  matchEvents MatchEvent[] // NEW: Detailed match events
+  paymentRecords PaymentRecord[] // NEW: Payment records for this fixture
+  
+  // Relations
+  plannedFormation Formation? @relation("PlannedFormation", fields: [plannedFormationId], references: [id])
+  actualFormation Formation? @relation("ActualFormation", fields: [actualFormationId], references: [id])
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  bonusVotes BonusVote[]
+}
+
+// NEW: Detailed match events (goals, cards, substitutions, etc.)
+model MatchEvent {
+  id        String   @id @default(uuid())
+  fixture   Fixture  @relation(fields: [fixtureId], references: [id])
+  fixtureId Int
+  eventType MatchEventType
+  minute    Int      // Minute of the event
+  player    User     @relation(fields: [playerId], references: [id])
+  playerId  Int
+  // Goal-specific fields
+  goalType String?   // OPEN_PLAY, PENALTY, SET_PIECE_DIRECT, SET_PIECE_INDIRECT, OPPONENT_OWN_GOAL, OWN_GOAL
+  assistedBy User?   @relation("GoalAssists", fields: [assistedById], references: [id])
+  assistedById Int?
+  // Card-specific fields
+  cardType  CardType?
+  // Substitution-specific fields
+  substitutedFor User? @relation("Substitutions", fields: [substitutedForId], references: [id])
+  substitutedForId Int?
+
+  // General fields
+  notes     String?  // Additional notes
+  createdAt DateTime @default(now())
+  
+  // Relations
+  paymentRecords PaymentRecord[]
+}
+
+// Planned team selection (what manager intended to play)
+model TeamSelection {
+  id          String   @id @default(uuid())
+  fixture     Fixture  @relation(fields: [fixtureId], references: [id])
+  fixtureId   Int      @unique
+  formationId String   @default("4-3-3") // Formation used for this team selection
+  version     Int      @default(1) // Version for future compatibility
+  starting11  Json     // Store position-specific assignments as JSON
+  substitutes Json     // Store substitutes as JSON array
+  createdBy   Int      // User ID who created the selection
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  formation   Formation @relation(fields: [formationId], references: [id])
+  
+  @@index([formationId])
+}
+
+// Actual team selection (what actually played on game day)
+model ActualTeamSelection {
+  id        String   @id @default(uuid())
+  fixture   Fixture  @relation(fields: [fixtureId], references: [id])
+  fixtureId Int      @unique
+  starting11 Json     // Store position-specific assignments as JSON
+  substitutes Json   // Store substitutes as JSON array
+  createdBy Int      // User ID who created the selection
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model FixtureRSVP {
+  id        String      @id @default(uuid())
+  user      User        @relation(fields: [userId], references: [id])
+  userId    Int
+  fixture   Fixture     @relation(fields: [fixtureId], references: [id])
+  fixtureId Int
+  status    RSVPStatus
+  createdAt DateTime    @default(now())
+
+  @@unique([userId, fixtureId])
+}
+
+model PlayerStats {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  fixture   Fixture  @relation(fields: [fixtureId], references: [id])
+  fixtureId Int
+  goals     Int      @default(0)
+  assists   Int      @default(0)
+  rating    Int?
+  bonusPoints Int    @default(0)
+  // Additional match statistics
+  subMinutes Int?    // Minutes played as substitute
+  yellowCards Int    @default(0)
+  redCards Int       @default(0)
+  kitWash Boolean    @default(false) // Whether player took kit home to wash
+  createdAt DateTime @default(now())
+
+  @@unique([userId, fixtureId])
+}
+
+model BonusVote {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  fixture   Fixture  @relation(fields: [fixtureId], references: [id])
+  fixtureId Int
+  rank      Int
+  createdAt DateTime @default(now())
+
+  @@unique([userId, fixtureId])
+}
+
+// Communication Hub Models
+model Post {
+  id        String   @id @default(uuid())
+  title     String
+  content   String
+  author    User     @relation("PostAuthor", fields: [authorId], references: [id])
+  authorId  Int
+  team      Team?    @relation(fields: [teamId], references: [id])
+  teamId    Int?     // null means post is for all teams
+  isPublic  Boolean  @default(true) // true = visible to all, false = team-specific
+  isEdited  Boolean  @default(false) // true if post has been edited
+  titleEdited Boolean @default(false) // true if title has been edited
+  contentEdited Boolean @default(false) // true if content has been edited
+  comments  Comment[]
+  reactions Reaction[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  content   String
+  author    User     @relation("CommentAuthor", fields: [authorId], references: [id])
+  authorId  Int
+  post      Post     @relation(fields: [postId], references: [id])
+  postId    String
+  isEdited  Boolean  @default(false) // true if comment has been edited
+  reactions Reaction[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Reaction {
+  id        String   @id @default(uuid())
+  type      ReactionType
+  user      User     @relation("ReactionUser", fields: [userId], references: [id])
+  userId    Int
+  post      Post?    @relation(fields: [postId], references: [id])
+  postId    String?
+  comment   Comment? @relation(fields: [commentId], references: [id])
+  commentId String?
+  createdAt DateTime @default(now())
+
+  @@unique([userId, postId, commentId])
+}
+
+enum ReactionType {
+  LIKE
+  LOVE
+  LAUGH
+  WOW
+  SAD
+  ANGRY
+}
+
+model Achievement {
+  id          String   @id @default(uuid())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      Int
+  type        AchievementType
+  title       String
+  description String
+  icon        String   // Emoji or icon name
+  earnedAt    DateTime @default(now())
+  season      String?  // Optional season reference
+  
+  @@unique([userId, type, season])
+}
+
+enum AchievementType {
+  TOP_SCORER
+  MOST_ASSISTS
+  MOST_CLEAN_SHEETS
+  MOST_APPEARANCES
+  PLAYER_OF_THE_SEASON
+  GOAL_OF_THE_SEASON
+  ASSIST_OF_THE_SEASON
+  FIRST_GOAL
+  FIRST_ASSIST
+  FIRST_CLEAN_SHEET
+  HAT_TRICK
+  BRACE
+  PERFECT_ATTENDANCE
+  COMEBACK_PLAYER
+  ROOKIE_OF_THE_SEASON
+}
+
+enum Location {
+  HOME
+  AWAY
+}
+
+enum FixtureType {
+  LEAGUE
+  CUP
+  FRIENDLY
+}
+
+enum ResultType {
+  ACTUAL_GAME
+  WALKOVER
+  POSTPONEMENT
+}
+
+enum WalkoverType {
+  HOME_WALKOVER
+  AWAY_WALKOVER
+}
+
+enum MatchEventType {
+  GOAL
+  CARD
+  SUBSTITUTION
+  PENALTY_SAVE
+  PENALTY_MISS
+}
+
+enum CardType {
+  YELLOW
+  RED
+  SIN_BIN
+}
+
+enum RSVPStatus {
+  YES
+  NO
+  MAYBE
+} 
+
+model LeagueTable {
+  id        Int      @id @default(autoincrement())
+  teamName  String
+  division  String
+  position  Int
+  played    Int
+  won       Int
+  drawn     Int
+  lost      Int
+  goalsFor  Int
+  goalsAgainst Int
+  goalDifference Int
+  points    Int
+  form      String   // JSON string of last 5 results: ["W", "D", "L", "W", "W"]
+  seasonId  String   // FA season identifier
+  scrapedAt DateTime @default(now())
+  lastUpdated DateTime @default(now())
+  
+  // Relations
+  scrapedTeam ScrapedTeam? @relation(fields: [scrapedTeamId], references: [id])
+  scrapedTeamId Int?
+  
+  @@unique([teamName, division, seasonId])
+}
+
+model ScrapedTeam {
+  id          Int      @id @default(autoincrement())
+  teamName    String   // "Westminster Wanderers FC 1st Team"
+  division    String   // "Supreme Trophies Graham Dodd Premier Div"
+  leagueId    String   // FA league identifier
+  divisionId  String   // FA division identifier
+  seasonId    String   // FA season identifier - ADDED
+  isActive    Boolean  @default(true) // For teams removed mid-season
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  teams       Team[]
+  leagueTables LeagueTable[]
+  teamIdentity TeamIdentity? @relation(fields: [teamIdentityId], references: [id])
+  teamIdentityId Int?
+  
+  @@unique([teamIdentityId, seasonId]) // A team can only be in one division per season
+}
+
+// New model to track team identity across seasons
+model TeamIdentity {
+  id          Int      @id @default(autoincrement())
+  canonicalName String // "Westminster Wanderers FC 1st Team" - normalized name
+  displayName String   // "Westminster Wanderers FC 1st Team" - display name
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  scrapedTeams ScrapedTeam[]
+  appTeam      Team?
+  
+  @@unique([canonicalName])
+}
+
+// Model to track division changes for teams
+model DivisionChangeLog {
+  id          Int      @id @default(autoincrement())
+  teamId      Int
+  oldDivision String
+  newDivision String
+  seasonId    String
+  changeDate  DateTime @default(now())
+  changeType  DivisionChangeType @default(AUTOMATIC)
+  
+  // Relations
+  team        Team     @relation(fields: [teamId], references: [id])
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([teamId])
+  @@index([seasonId])
+  @@index([changeDate])
+}
+
+enum DivisionChangeType {
+  AUTOMATIC
+  MANUAL
+}
+
+enum ScrapingStatus {
+  PENDING
+  IN_PROGRESS
+  SUCCESS
+  PARTIAL_SUCCESS
+  FAILED
+  RETRY_PENDING
+}
+
+enum ScrapingType {
+  DISCOVERY
+  LEAGUE_TABLE
+  DIVISION_SEASONS
+  FULL_UPDATE
+}
+
+model ScrapingLog {
+  id          Int           @id @default(autoincrement())
+  type        ScrapingType  // Type of scraping operation
+  status      ScrapingStatus // Current status of the operation
+  divisionId  String?       // FA division identifier
+  seasonId    String?       // FA season identifier
+  leagueId    String        // FA league identifier
+  
+  // Operation details
+  startedAt   DateTime      @default(now())
+  completedAt DateTime?     // When operation finished
+  processingTime Int?       // Processing time in milliseconds
+  
+  // Results
+  teamsFound  Int           @default(0)
+  teamsCreated Int          @default(0)
+  teamsUpdated Int          @default(0)
+  teamsSkipped Int          @default(0)
+  errors      String[]      // Array of error messages
+  warnings    String[]      // Array of warning messages
+  
+  // Retry information
+  retryCount  Int           @default(0)
+  maxRetries  Int           @default(3)
+  lastRetryAt DateTime?
+  nextRetryAt DateTime?
+  
+  // User who initiated the operation
+  initiatedBy User?         @relation(fields: [initiatedById], references: [id])
+  initiatedById Int?
+  
+  // Additional metadata
+  metadata    String?       // JSON string for additional data
+  notes       String?       // Manual notes about the operation
+  
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  
+  @@index([status])
+  @@index([type])
+  @@index([startedAt])
+  @@index([divisionId, seasonId])
+}
+
+// Model to store division hierarchy mappings per season
+model DivisionHierarchy {
+  id          Int      @id @default(autoincrement())
+  seasonId    String   // FA season identifier
+  leagueId    String   // FA league identifier
+  hierarchy   String   // JSON array of division IDs in order (highest to lowest)
+  divisionNames String // JSON object mapping divisionId to display name
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@unique([seasonId, leagueId])
+  @@index([seasonId])
+  @@index([leagueId])
+}
+
+// Formation System Models
+model Formation {
+  id          String   @id // "4-3-3", "4-4-2", "3-5-2", "4-5-1"
+  version     Int      @default(1)
+  name        String   // "4-3-3 Attacking"
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  positions   FormationPosition[]
+  teamSelections TeamSelection[]
+  plannedFixtures Fixture[] @relation("PlannedFormation")
+  actualFixtures Fixture[] @relation("ActualFormation")
+  stats       FormationStats[]
+}
+
+model FormationPosition {
+  id            String   @id // "lb", "cb1", "st1", "lwb", etc.
+  formationId   String
+  name          String   // "Left Back", "Center Back 1", "Striker 1"
+  category      PositionCategory
+  displayOrder  Int
+  isDefensive   Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  
+  // Relations
+  formation     Formation @relation(fields: [formationId], references: [id], onDelete: Cascade)
+  
+  @@index([formationId])
+}
+
+enum PositionCategory {
+  DEFENDER
+  MIDFIELDER
+  FORWARD
+}
+
+// Calendar & RSVP System Enums
+enum EventType {
+  FIXTURE
+  TRAINING
+  SOCIAL
+  AWARDS
+}
+
+enum EventScope {
+  CLUB_WIDE
+  TEAM_SPECIFIC
+}
+
+model FormationStats {
+  id            Int      @id @default(autoincrement())
+  teamId        Int
+  formationId   String
+  gamesPlayed   Int      @default(0)
+  wins          Int      @default(0)
+  draws         Int      @default(0)
+  losses        Int      @default(0)
+  goalsScored   Int      @default(0)
+  goalsConceded Int      @default(0)
+  lastUpdated   DateTime @default(now()) @updatedAt
+  
+  // Relations
+  team          Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  formation     Formation @relation(fields: [formationId], references: [id], onDelete: Cascade)
+  
+  @@unique([teamId, formationId])
+  @@index([teamId])
+  @@index([formationId])
+}
+
+// Club Settings Models
+model ClubSettings {
+  id          String   @id @default(cuid())
+  category    String   // 'branding', 'communication', 'system'
+  key         String   // unique key within category
+  value       String   // JSON string for complex values
+  description String?  // human-readable description
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([category, key])
+  @@index([category])
+  @@index([key])
+}
+
+model ClubLogo {
+  id           String   @id @default(cuid())
+  filename     String   // stored filename
+  originalName String   // original uploaded filename
+  mimeType     String   // image mime type
+  size         Int      // file size in bytes
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([isActive])
+  @@index([createdAt])
+}
+
+// Calendar & RSVP System Models
+model Event {
+  id              String      @id @default(cuid())
+  title           String
+  description     String?
+  eventType       EventType   // FIXTURE, TRAINING, SOCIAL, AWARDS
+  eventSubtype    String?     // SMALL_SIDED, CLUB_WIDE, FITNESS, etc.
+  startDateTime   DateTime
+  endDateTime     DateTime?   // Optional for socials
+  location        String?     // Custom location name (e.g., "Battersea Astro", "HOME", "AWAY")
+  address         String?
+  cost            Decimal?    @db.Decimal(10,2)
+  maxAttendees    Int?
+  rsvpDeadline    DateTime?
+  isRecurring     Boolean     @default(false)
+  recurringRule   Json?       // RRULE format for recurring events
+  parentEventId   String?     // For recurring event instances
+  createdBy       Int         // User ID
+  createdFor      EventScope  // CLUB_WIDE, TEAM_SPECIFIC
+  teamId          Int?        // For team-specific events
+  isActive        Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relations
+  creator         User        @relation("EventCreator", fields: [createdBy], references: [id])
+  team            Team?       @relation(fields: [teamId], references: [id])
+  rsvps           EventRSVP[]
+  attendees       EventAttendance[]
+  invitedUsers    EventInvitation[]
+  paymentRecords  PaymentRecord[]
+  
+  @@index([eventType])
+  @@index([startDateTime])
+  @@index([teamId])
+  @@index([isRecurring])
+  @@index([parentEventId])
+}
+
+// Unified RSVP system (replaces FixtureRSVP)
+model EventRSVP {
+  id        String      @id @default(cuid())
+  event     Event       @relation(fields: [eventId], references: [id])
+  eventId   String
+  user      User        @relation(fields: [userId], references: [id])
+  userId    Int
+  status    RSVPStatus  // YES, NO, MAYBE
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@unique([eventId, userId])
+  @@index([eventId])
+  @@index([userId])
+}
+
+// Attendance tracking (separate from RSVP)
+model EventAttendance {
+  id        String   @id @default(cuid())
+  event     Event    @relation(fields: [eventId], references: [id])
+  eventId   String
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  markedBy  Int      // User ID who marked attendance
+  markedAt  DateTime @default(now())
+
+  // Relations
+  markedByUser User @relation("AttendanceMarker", fields: [markedBy], references: [id])
+
+  @@unique([eventId, userId])
+  @@index([eventId])
+  @@index([userId])
+}
+
+// Event invitations (for cross-team invites)
+model EventInvitation {
+  id        String   @id @default(cuid())
+  event     Event    @relation(fields: [eventId], references: [id])
+  eventId   String
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  invitedBy Int      // User ID who sent invitation
+  invitedAt DateTime @default(now())
+  accepted  Boolean? // null = pending, true = accepted, false = declined
+
+  @@unique([eventId, userId])
+  @@index([eventId])
+  @@index([userId])
+}
+
+// Training cost configuration
+model TrainingCost {
+  id          String   @id @default(cuid())
+  trainingType String  // SMALL_SIDED, CLUB_WIDE, FITNESS
+  cost        Decimal  @db.Decimal(10,2)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([trainingType])
+}
+
+// Financial Tracking System Models
+enum PaymentType {
+  YEARLY_SUBS
+  MATCH_FEE
+  TRAINING_FEE
+  SOCIAL_EVENT
+  YELLOW_CARD_FEE
+  RED_CARD_FEE
+}
+
+enum PaymentStatus {
+  PAID
+  DUE
+  PARTIAL
+  OVERDUE
+}
+
+enum PaymentMethod {
+  SQUARE
+  CASH
+  BANK_TRANSFER
+  MANUAL
+  CREDIT_ALLOCATION
+}
+
+enum DiscountType {
+  UNEMPLOYED
+  STUDENT
+}
+
+// Payment configuration table
+model PaymentConfig {
+  id              String      @id @default(cuid())
+  paymentType     PaymentType // YEARLY_SUBS, MATCH_FEE, TRAINING_FEE, YELLOW_CARD_FEE, RED_CARD_FEE
+  amount          Decimal     @db.Decimal(10,2)
+  isActive        Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@unique([paymentType])
+  @@index([paymentType])
+}
+
+// Individual payment records
+model PaymentRecord {
+  id              String      @id @default(cuid())
+  userId          Int
+  paymentType     PaymentType
+  amount          Decimal     @db.Decimal(10,2)
+  discountAmount  Decimal     @db.Decimal(10,2) @default(0)
+  finalAmount     Decimal     @db.Decimal(10,2)
+  paidAmount      Decimal     @db.Decimal(10,2) @default(0)  // Track cumulative payments
+  status          PaymentStatus
+  dueDate         DateTime
+  paidDate        DateTime?
+  eventId         String?     // Link to specific event
+  fixtureId       Int?        // Link to specific fixture (for match fees)
+  matchEventId    String?     // Link to match event (for card fees)
+  matchMinutes    Int?        // For match fee calculations
+  selectionType   String?     // 'STARTING' | 'SUBSTITUTE' (for match fees)
+  paymentMethod   PaymentMethod
+  squarePaymentId String?     // Square API reference
+  markedBy        Int?        // User who marked as paid (for manual payments)
+  notes           String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relations
+  user            User        @relation(fields: [userId], references: [id])
+  event           Event?      @relation(fields: [eventId], references: [id])
+  fixture         Fixture?    @relation(fields: [fixtureId], references: [id])
+  matchEvent      MatchEvent? @relation(fields: [matchEventId], references: [id])
+  markedByUser    User?       @relation("PaymentMarker", fields: [markedBy], references: [id])
+
+  @@index([userId])
+  @@index([paymentType])
+  @@index([status])
+  @@index([dueDate])
+  @@index([eventId])
+  @@index([fixtureId])
+  @@index([matchEventId])
+  @@index([selectionType])
+  @@index([squarePaymentId])
+}
+
+// User balance tracking
+model UserBalance {
+  id              String      @id @default(cuid())
+  userId          Int         @unique
+  currentBalance  Decimal     @db.Decimal(10,2) @default(0)
+  lastUpdated     DateTime    @default(now())
+  
+  // Relations
+  user            User        @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+// Discount eligibility tracking
+model DiscountEligibility {
+  id              String      @id @default(cuid())
+  userId          Int
+  discountType    DiscountType // UNEMPLOYED, STUDENT
+  isActive        Boolean     @default(true)
+  startDate       DateTime    @default(now())
+  endDate         DateTime?
+  verifiedBy      Int
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relations
+  user            User        @relation(fields: [userId], references: [id])
+  verifiedByUser  User        @relation("DiscountVerifier", fields: [verifiedBy], references: [id])
+
+  @@index([userId])
+  @@index([discountType])
+  @@index([isActive])
+}
+
+// Scheduled job run tracking
+model ScheduledJobRun {
+  id        String   @id @default(cuid())
+  jobName   String   @unique
+  lastRun   DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([jobName])
+} 
