@@ -23,7 +23,7 @@ export class YearlySubsController {
   @Roles('ADMIN')
   async getAvailableSeasons() {
     try {
-      const discovery = await this.scrapingService.discoverAll();
+      const discovery = await this.scrapingService.discoverAllWithFallback();
       const seasons = discovery.seasons || [];
       
       // Convert season IDs to readable names
@@ -160,7 +160,7 @@ export class YearlySubsController {
   async getSeasonStatus(@Param('seasonId') seasonId: string) {
     try {
       // Get season info
-      const discovery = await this.scrapingService.discoverAll();
+      const discovery = await this.scrapingService.discoverAllWithFallback();
       const season = discovery.seasons?.find((s: Season) => s.id === seasonId);
       
       if (!season) {
@@ -267,7 +267,7 @@ export class YearlySubsController {
       }
 
       // Get season info for the notes
-      const discovery = await this.scrapingService.discoverAll();
+      const discovery = await this.scrapingService.discoverAllWithFallback();
       const season = discovery.seasons?.find((s: Season) => s.id === seasonId);
       
       if (!season) {

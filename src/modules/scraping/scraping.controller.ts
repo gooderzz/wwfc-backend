@@ -74,7 +74,7 @@ export class ScrapingController {
   @Roles('ADMIN', 'MANAGER')
   async getDivisions() {
     try {
-      return await this.scraperService.discoverDivisions();
+      return await this.scraperService.discoverDivisionsWithFallback();
     } catch (error) {
       return {
         success: false,
@@ -88,7 +88,7 @@ export class ScrapingController {
   @Roles('ADMIN', 'MANAGER')
   async getSeasons() {
     try {
-      return await this.scraperService.discoverSeasons();
+      return await this.scraperService.discoverSeasonsWithFallback();
     } catch (error) {
       return {
         success: false,
@@ -200,7 +200,7 @@ export class ScrapingController {
   @Roles('ADMIN', 'MANAGER')
   async discoverAll() {
     try {
-      return await this.scraperService.discoverAll();
+      return await this.scraperService.discoverAllWithFallback();
     } catch (error) {
       return {
         success: false,
