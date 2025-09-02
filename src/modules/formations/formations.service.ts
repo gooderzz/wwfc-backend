@@ -54,25 +54,23 @@ export class FormationsService {
       throw new BadRequestException(`Formation with ID ${formationData.id} already exists`);
     }
 
-    // Create formation with positions in a transaction
-    return this.prisma.$transaction(async (prisma: any) => {
-      const formation = await prisma.formation.create({
-        data: formationData
-      });
-
-      // Create positions with unique IDs
-      for (const positionData of positions) {
-        await prisma.formationPosition.create({
-          data: {
-            ...positionData,
-            id: `${formation.id}_${positionData.id}`,
-            formationId: formation.id
-          }
-        });
-      }
-
-      return this.getFormationById(formation.id);
+    // Create formation with positions sequentially for better pooler compatibility
+    const formation = await this.prisma.formation.create({
+      data: formationData
     });
+
+    // Create positions with unique IDs
+    for (const positionData of positions) {
+      await this.prisma.formationPosition.create({
+        data: {
+          ...positionData,
+          id: `${formation.id}_${positionData.id}`,
+          formationId: formation.id
+        }
+      });
+    }
+
+    return this.getFormationById(formation.id);
   }
 
   async updateFormation(id: string, updateFormationDto: UpdateFormationDto): Promise<Formation> {

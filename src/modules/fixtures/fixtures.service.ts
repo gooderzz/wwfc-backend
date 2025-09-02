@@ -612,119 +612,115 @@ export class FixturesService {
     if (user.role === 'MANAGER' && user.teamId !== fixture.teamId)
       throw new ForbiddenException('Not manager of this team');
 
-    // Start a transaction to handle both fixture update and match events
-    const updatedFixture = await this.prisma.$transaction(async (prisma) => {
-      // Update the fixture
-      const updatedFixture = await prisma.fixture.update({
-        where: { id: fixtureId },
-        data: {
-          homeGoals: dto.homeGoals,
-          awayGoals: dto.awayGoals,
-          isPlayed: true,
-          resultType: dto.resultType,
-          walkoverType: dto.walkoverType,
-          postponementReason: dto.postponementReason,
-          totalSaves: dto.totalSaves,
-          actualFormationId: dto.actualFormationId,
-          plannedFormationId: dto.plannedFormationId,
-          formationChanged: dto.formationChanged,
-        },
-      });
+    // Process operations sequentially for better pooler compatibility
+    // Update the fixture
+    const updatedFixture = await this.prisma.fixture.update({
+      where: { id: fixtureId },
+      data: {
+        homeGoals: dto.homeGoals,
+        awayGoals: dto.awayGoals,
+        isPlayed: true,
+        resultType: dto.resultType,
+        walkoverType: dto.walkoverType,
+        postponementReason: dto.postponementReason,
+        totalSaves: dto.totalSaves,
+        actualFormationId: dto.actualFormationId,
+        plannedFormationId: dto.plannedFormationId,
+        formationChanged: dto.formationChanged,
+      },
+    });
 
-      // If there are match events, create them
-      if (dto.matchEvents && dto.matchEvents.length > 0) {
-        // Handle card fee deletion for existing match events before deleting them
-        try {
-          const existingCardEvents = await prisma.matchEvent.findMany({
-            where: { 
-              fixtureId,
-              eventType: 'CARD',
-              cardType: { in: ['YELLOW', 'RED'] }
-            }
-          });
-
-          for (const cardEvent of existingCardEvents) {
-            try {
-              await this.feeIntegrationService.handleCardFeeDeletion(
-                cardEvent.id, 
-                cardEvent.playerId
-              );
-            } catch (error) {
-              console.error(`Failed to handle card fee deletion for event ${cardEvent.id}:`, error);
-              // Don't fail the transaction if fee deletion fails
-            }
+    // If there are match events, create them
+    if (dto.matchEvents && dto.matchEvents.length > 0) {
+      // Handle card fee deletion for existing match events before deleting them
+      try {
+        const existingCardEvents = await this.prisma.matchEvent.findMany({
+          where: { 
+            fixtureId,
+            eventType: 'CARD',
+            cardType: { in: ['YELLOW', 'RED'] }
           }
-        } catch (error) {
-          console.error('Failed to handle existing card fee deletions:', error);
-          // Don't fail the transaction if fee deletion fails
-        }
-
-        // Delete existing match events for this fixture
-        await prisma.matchEvent.deleteMany({
-          where: { fixtureId }
         });
 
-        // Create new match events
-        for (const event of dto.matchEvents) {
-          const createdEvent = await prisma.matchEvent.create({
-            data: {
-              fixtureId,
-              eventType: event.eventType as any,
-              minute: event.minute,
-              playerId: event.playerId,
-              goalType: event.goalType,
-              assistedById: event.assistedById,
-              cardType: event.cardType as any,
-              substitutedForId: event.substitutedForId,
-              notes: event.notes,
-            },
-          });
-
-          // Create card fees for yellow and red cards
-          if (event.eventType === 'CARD' && (event.cardType === 'YELLOW' || event.cardType === 'RED')) {
-            try {
-              await this.feeIntegrationService.createCardFee(
-                event.playerId, 
-                createdEvent.id, 
-                event.cardType, 
-                fixtureId
-              );
-            } catch (error) {
-              console.error(`Failed to create card fee for event ${createdEvent.id}:`, error);
-              // Don't fail the transaction if fee creation fails
-            }
+        for (const cardEvent of existingCardEvents) {
+          try {
+            await this.feeIntegrationService.handleCardFeeDeletion(
+              cardEvent.id, 
+              cardEvent.playerId
+            );
+          } catch (error) {
+            console.error(`Failed to handle card fee deletion for event ${cardEvent.id}:`, error);
+            // Don't fail if fee deletion fails
           }
         }
+      } catch (error) {
+        console.error('Failed to handle existing card fee deletions:', error);
+        // Don't fail if fee deletion fails
+      }
 
-        // Create match fees for players who actually played (after events are saved)
-        try {
-          // Get the actual team selection to create fees
-          const actualTeamSelection = await prisma.actualTeamSelection.findUnique({
-            where: { fixtureId }
-          });
-          
-          if (actualTeamSelection) {
-            await this.feeIntegrationService.createMatchFeesForTeamSelection(fixtureId, {
-              starting11: actualTeamSelection.starting11 as any,
-              substitutes: actualTeamSelection.substitutes as number[]
-            });
+      // Delete existing match events for this fixture
+      await this.prisma.matchEvent.deleteMany({
+        where: { fixtureId }
+      });
+
+      // Create new match events
+      for (const event of dto.matchEvents) {
+        const createdEvent = await this.prisma.matchEvent.create({
+          data: {
+            fixtureId,
+            eventType: event.eventType as any,
+            minute: event.minute,
+            playerId: event.playerId,
+            goalType: event.goalType,
+            assistedById: event.assistedById,
+            cardType: event.cardType as any,
+            substitutedForId: event.substitutedForId,
+            notes: event.notes,
+          },
+        });
+
+        // Create card fees for yellow and red cards
+        if (event.eventType === 'CARD' && (event.cardType === 'YELLOW' || event.cardType === 'RED')) {
+          try {
+            await this.feeIntegrationService.createCardFee(
+              event.playerId, 
+              createdEvent.id, 
+              event.cardType, 
+              fixtureId
+            );
+          } catch (error) {
+            console.error(`Failed to create card fee for event ${createdEvent.id}:`, error);
+            // Don't fail if fee creation fails
           }
-        } catch (error) {
-          console.error('Failed to create match fees:', error);
-          // Don't fail the transaction if fee creation fails
         }
       }
 
-      return updatedFixture;
-    });
+      // Create match fees for players who actually played (after events are saved)
+      try {
+        // Get the actual team selection to create fees
+        const actualTeamSelection = await this.prisma.actualTeamSelection.findUnique({
+          where: { fixtureId }
+        });
+        
+        if (actualTeamSelection) {
+          await this.feeIntegrationService.createMatchFeesForTeamSelection(fixtureId, {
+            starting11: actualTeamSelection.starting11 as any,
+            substitutes: actualTeamSelection.substitutes as number[]
+          });
+        }
+      } catch (error) {
+        console.error('Failed to create match fees:', error);
+        // Don't fail if fee creation fails
+      }
+    }
 
-    // Apply match minutes discounts based on substitution events (AFTER transaction commits)
-    // This needs to be outside the transaction so it can see the newly saved match events
+    // Apply match minutes discounts based on substitution events
+    // This needs to be after all operations are complete
     try {
       await this.feeIntegrationService.applyMatchMinutesDiscountsFromEvents(fixtureId);
     } catch (error) {
       console.error('Failed to apply match minutes discounts:', error);
-      // Don't fail the transaction if discount application fails
+      // Don't fail if discount application fails
     }
 
     return updatedFixture;

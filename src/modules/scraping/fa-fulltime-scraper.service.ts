@@ -478,39 +478,37 @@ export class FAFullTimeScraperService {
         };
       }
 
-      // Use transaction for rollback on failure
-      const result = await this.prisma.$transaction(async (tx) => {
-        const division = await this.getOrCreateDivision(tx, divisionId, leagueId);
-        const season = await this.getOrCreateSeason(tx, seasonId, leagueId);
-        
-        const updateResults = {
-          teamsCreated: 0,
-          teamsUpdated: 0,
-          teamsSkipped: 0,
-          errors: [] as string[],
-        };
+      // Process teams sequentially for better pooler compatibility
+      const division = await this.getOrCreateDivision(null, divisionId, leagueId);
+      const season = await this.getOrCreateSeason(null, seasonId, leagueId);
+      
+      const updateResults = {
+        teamsCreated: 0,
+        teamsUpdated: 0,
+        teamsSkipped: 0,
+        errors: [] as string[],
+      };
 
-        // Process each team in the league table
-        for (const entry of leagueTableData) {
-          try {
-            const teamResult = await this.processTeamEntry(tx, entry, division, season);
-            
-            if (teamResult.created) {
-              updateResults.teamsCreated++;
-            } else if (teamResult.updated) {
-              updateResults.teamsUpdated++;
-            } else {
-              updateResults.teamsSkipped++;
-            }
-          } catch (error) {
-            const errorMsg = `Failed to process team ${entry.teamName}: ${error.message}`;
-            this.logger.error(errorMsg);
-            updateResults.errors.push(errorMsg);
+      // Process each team sequentially
+      for (const entry of leagueTableData) {
+        try {
+          const teamResult = await this.processTeamEntry(this.prisma, entry, division, season);
+          
+          if (teamResult.created) {
+            updateResults.teamsCreated++;
+          } else if (teamResult.updated) {
+            updateResults.teamsUpdated++;
+          } else {
+            updateResults.teamsSkipped++;
           }
+        } catch (error) {
+          const errorMsg = `Failed to process team ${entry.teamName}: ${error.message}`;
+          this.logger.error(errorMsg);
+          updateResults.errors.push(errorMsg);
         }
+      }
 
-        return updateResults;
-      });
+      const result = updateResults;
 
       const processingTime = Date.now() - startTime;
       
@@ -573,7 +571,7 @@ export class FAFullTimeScraperService {
   /**
    * Process a single team entry from the league table
    */
-  private async processTeamEntry(tx: any, entry: LeagueTableEntry, division: any, season: any) {
+  private async processTeamEntry(prisma: any, entry: LeagueTableEntry, division: any, season: any) {
     const result = { created: false, updated: false };
 
     try {
@@ -583,7 +581,7 @@ export class FAFullTimeScraperService {
       const teamIdentity = await this.teamIdentityService.getOrCreateTeamIdentity(entry.teamName);
       
       // First, try to find or create the scraped team
-      const scrapedTeam = await tx.scrapedTeam.upsert({
+      const scrapedTeam = await prisma.scrapedTeam.upsert({
         where: {
           teamIdentityId_seasonId: {
             teamIdentityId: teamIdentity.id,
@@ -615,7 +613,7 @@ export class FAFullTimeScraperService {
       try {
         const existingTeam = await this.findExistingTeam(entry.teamName);
         if (existingTeam && !existingTeam.teamIdentityId) {
-          await tx.team.update({
+          await prisma.team.update({
             where: { id: existingTeam.id },
             data: { teamIdentityId: teamIdentity.id },
           });
@@ -627,7 +625,7 @@ export class FAFullTimeScraperService {
       }
 
       // Update or create league table entry
-      const leagueTableEntry = await tx.leagueTable.upsert({
+      const leagueTableEntry = await prisma.leagueTable.upsert({
         where: {
           teamName_division_seasonId: {
             teamName: entry.teamName,

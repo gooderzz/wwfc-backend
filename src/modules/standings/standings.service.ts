@@ -95,48 +95,46 @@ export class StandingsService {
   }
 
   async updateLeagueTable(entries: Omit<LeagueTableEntry, 'id' | 'lastUpdated'>[], seasonId: string): Promise<void> {
-    // Use transaction to update all entries atomically
-    await this.prisma.$transaction(async (tx) => {
-      for (const entry of entries) {
-        await tx.leagueTable.upsert({
-          where: {
-            teamName_division_seasonId: {
-              teamName: entry.teamName,
-              division: entry.division,
-              seasonId: seasonId
-            }
-          },
-          update: {
-            position: entry.position,
-            played: entry.played,
-            won: entry.won,
-            drawn: entry.drawn,
-            lost: entry.lost,
-            goalsFor: entry.goalsFor,
-            goalsAgainst: entry.goalsAgainst,
-            goalDifference: entry.goalDifference,
-            points: entry.points,
-            form: JSON.stringify(entry.form),
-            lastUpdated: new Date()
-          },
-          create: {
+    // Update entries sequentially for better pooler compatibility
+    for (const entry of entries) {
+      await this.prisma.leagueTable.upsert({
+        where: {
+          teamName_division_seasonId: {
             teamName: entry.teamName,
             division: entry.division,
-            seasonId: seasonId,
-            position: entry.position,
-            played: entry.played,
-            won: entry.won,
-            drawn: entry.drawn,
-            lost: entry.lost,
-            goalsFor: entry.goalsFor,
-            goalsAgainst: entry.goalsAgainst,
-            goalDifference: entry.goalDifference,
-            points: entry.points,
-            form: JSON.stringify(entry.form)
+            seasonId: seasonId
           }
-        });
-      }
-    });
+        },
+        update: {
+          position: entry.position,
+          played: entry.played,
+          won: entry.won,
+          drawn: entry.drawn,
+          lost: entry.lost,
+          goalsFor: entry.goalsFor,
+          goalsAgainst: entry.goalsAgainst,
+          goalDifference: entry.goalDifference,
+          points: entry.points,
+          form: JSON.stringify(entry.form),
+          lastUpdated: new Date()
+        },
+        create: {
+          teamName: entry.teamName,
+          division: entry.division,
+          seasonId: seasonId,
+          position: entry.position,
+          played: entry.played,
+          won: entry.won,
+          drawn: entry.drawn,
+          lost: entry.lost,
+          goalsFor: entry.goalsFor,
+          goalsAgainst: entry.goalsAgainst,
+          goalDifference: entry.goalDifference,
+          points: entry.points,
+          form: JSON.stringify(entry.form)
+        }
+      });
+    }
   }
 
   async getDivisions(): Promise<string[]> {

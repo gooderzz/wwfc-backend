@@ -471,35 +471,33 @@ export class PaymentRecordService {
       throw new NotFoundException(`Payment record with ID ${id} not found`);
     }
 
-    // Use transaction to ensure data consistency
-    return this.prisma.$transaction(async (prisma) => {
-      // If the fee was already paid, we need to credit the user's balance
-      if (existingRecord.status === PaymentStatus.PAID && parseFloat(existingRecord.paidAmount.toString()) > 0) {
-        const paidAmount = parseFloat(existingRecord.paidAmount.toString());
-        
-        // Create a credit record to refund the paid amount
-        await prisma.paymentRecord.create({
-          data: {
-            userId: existingRecord.userId,
-            paymentType: PaymentType.SOCIAL_EVENT, // Using SOCIAL_EVENT for credit records
-            amount: 0,
-            discountAmount: 0,
-            finalAmount: paidAmount,
-            paidAmount: paidAmount,
-            status: PaymentStatus.PAID,
-            dueDate: new Date(),
-            paidDate: new Date(),
-            paymentMethod: PaymentMethod.MANUAL,
-            notes: `Fee deletion refund - ${existingRecord.paymentType} (${existingRecord.id})`,
-            markedBy: existingRecord.markedBy,
-          },
-        });
-      }
-
-      // Delete the original payment record
-      return prisma.paymentRecord.delete({
-        where: { id },
+    // Process operations sequentially for better pooler compatibility
+    // If the fee was already paid, we need to credit the user's balance
+    if (existingRecord.status === PaymentStatus.PAID && parseFloat(existingRecord.paidAmount.toString()) > 0) {
+      const paidAmount = parseFloat(existingRecord.paidAmount.toString());
+      
+      // Create a credit record to refund the paid amount
+      await this.prisma.paymentRecord.create({
+        data: {
+          userId: existingRecord.userId,
+          paymentType: PaymentType.SOCIAL_EVENT, // Using SOCIAL_EVENT for credit records
+          amount: 0,
+          discountAmount: 0,
+          finalAmount: paidAmount,
+          paidAmount: paidAmount,
+          status: PaymentStatus.PAID,
+          dueDate: new Date(),
+          paidDate: new Date(),
+          paymentMethod: PaymentMethod.MANUAL,
+          notes: `Fee deletion refund - ${existingRecord.paymentType} (${existingRecord.id})`,
+          markedBy: existingRecord.markedBy,
+        },
       });
+    }
+
+    // Delete the original payment record
+    return this.prisma.paymentRecord.delete({
+      where: { id },
     });
   }
 
