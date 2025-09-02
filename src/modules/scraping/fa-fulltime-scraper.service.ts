@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as puppeteer from 'puppeteer';
 import * as cheerio from 'cheerio';
 import { PrismaService } from '../../prisma.service';
 import { TeamIdentityService } from '../teams/team-identity.service';
@@ -14,6 +13,7 @@ import {
   ScrapingTypeEnum,
   ScrapingLogEntry
 } from './scraping.types';
+import { IBrowserService, BrowserServiceFactory } from './browser-services';
 
 @Injectable()
 export class FAFullTimeScraperService {
@@ -21,41 +21,23 @@ export class FAFullTimeScraperService {
   private readonly baseUrl = 'https://fulltime.thefa.com';
   private readonly defaultLeagueId = '3545957'; // Southern Sunday Football League
   private isSafeMode = true; // Safe testing mode - no DB writes
-  private browser: puppeteer.Browser | null = null;
+  private browserService: IBrowserService;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly teamIdentityService: TeamIdentityService
   ) {
-    // Initialize browser lazily when needed
+    // Initialize browser service based on environment
+    this.browserService = BrowserServiceFactory.create();
   }
 
   /**
    * Initialize browser instance
    */
-  private async getBrowser(): Promise<puppeteer.Browser> {
+  private async getBrowser() {
     try {
-      if (!this.browser || !this.browser.isConnected()) {
-        if (this.browser) {
-          await this.browser.close();
-        }
-        
-        this.logger.log('Launching Puppeteer browser...');
-        this.browser = await puppeteer.launch({
-          headless: true, // Run in headless mode
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu'
-          ]
-        });
-        this.logger.log('Browser launched successfully');
-      }
-      return this.browser;
+      this.logger.log('Getting browser instance...');
+      return await this.browserService.launch();
     } catch (error) {
       this.logger.error(`Failed to initialize browser: ${error.message}`);
       throw new Error(`Browser initialization failed: ${error.message}`);
@@ -66,10 +48,11 @@ export class FAFullTimeScraperService {
    * Close browser instance
    */
   async closeBrowser(): Promise<void> {
-    if (this.browser) {
-      await this.browser.close();
-      this.browser = null;
+    try {
+      await this.browserService.close();
       this.logger.log('Browser closed');
+    } catch (error) {
+      this.logger.warn(`Error closing browser: ${error.message}`);
     }
   }
 
@@ -1457,6 +1440,134 @@ export class FAFullTimeScraperService {
     } catch (error) {
       this.logger.error(`Failed to get scraped teams: ${error.message}`);
       throw error;
+    }
+  }
+
+  /**
+   * Get cached divisions from database
+   */
+  private async getCachedDivisions(): Promise<Division[]> {
+    try {
+      this.logger.log('Attempting to get cached divisions from database...');
+      
+      // Get the most recent division data from scraped teams
+      const latestSeason = await this.prisma.scrapedTeam.findFirst({
+        orderBy: { seasonId: 'desc' },
+        select: { seasonId: true }
+      });
+
+      if (!latestSeason) {
+        this.logger.warn('No cached division data found');
+        return [];
+      }
+
+      // Get unique divisions from scraped teams
+      const divisions = await this.prisma.scrapedTeam.findMany({
+        where: { 
+          seasonId: latestSeason.seasonId,
+          isActive: true,
+          teamName: { startsWith: 'Division' }
+        },
+        select: {
+          divisionId: true,
+          division: true,
+          seasonId: true
+        },
+        distinct: ['divisionId']
+      });
+
+      const cachedDivisions: Division[] = divisions.map(div => ({
+        id: div.divisionId,
+        name: div.division,
+        leagueId: this.defaultLeagueId,
+        isActive: true
+      }));
+
+      this.logger.log(`Retrieved ${cachedDivisions.length} cached divisions`);
+      return cachedDivisions;
+    } catch (error) {
+      this.logger.error(`Failed to get cached divisions: ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Get cached seasons from database
+   */
+  private async getCachedSeasons(): Promise<Season[]> {
+    try {
+      this.logger.log('Attempting to get cached seasons from database...');
+      
+      // Get unique seasons from scraped teams
+      const seasons = await this.prisma.scrapedTeam.findMany({
+        select: {
+          seasonId: true
+        },
+        distinct: ['seasonId'],
+        orderBy: { seasonId: 'desc' }
+      });
+
+      const cachedSeasons: Season[] = seasons.map(season => ({
+        id: season.seasonId,
+        name: `Season ${season.seasonId}`,
+        year: new Date().getFullYear(),
+        isLive: false, // Assume cached seasons are not live
+        leagueId: this.defaultLeagueId
+      }));
+
+      this.logger.log(`Retrieved ${cachedSeasons.length} cached seasons`);
+      return cachedSeasons;
+    } catch (error) {
+      this.logger.error(`Failed to get cached seasons: ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Enhanced discoverDivisions with fallback
+   */
+  async discoverDivisionsWithFallback(leagueId: string = this.defaultLeagueId): Promise<Division[]> {
+    try {
+      return await this.discoverDivisions(leagueId);
+    } catch (error) {
+      this.logger.warn(`Scraping divisions failed, returning cached data: ${error.message}`);
+      return await this.getCachedDivisions();
+    }
+  }
+
+  /**
+   * Enhanced discoverSeasons with fallback
+   */
+  async discoverSeasonsWithFallback(leagueId: string = this.defaultLeagueId): Promise<Season[]> {
+    try {
+      return await this.discoverSeasons(leagueId);
+    } catch (error) {
+      this.logger.warn(`Scraping seasons failed, returning cached data: ${error.message}`);
+      return await this.getCachedSeasons();
+    }
+  }
+
+  /**
+   * Enhanced discoverAll with fallback
+   */
+  async discoverAllWithFallback(leagueId: string = this.defaultLeagueId): Promise<DiscoveryResult> {
+    try {
+      return await this.discoverAll(leagueId);
+    } catch (error) {
+      this.logger.warn(`Comprehensive discovery failed, returning cached data: ${error.message}`);
+      
+      const [cachedDivisions, cachedSeasons] = await Promise.all([
+        this.getCachedDivisions(),
+        this.getCachedSeasons()
+      ]);
+
+      return {
+        divisions: cachedDivisions,
+        seasons: cachedSeasons,
+        lastUpdated: new Date(),
+        success: false,
+        error: `Using cached data due to scraping failure: ${error.message}`,
+      };
     }
   }
 }
