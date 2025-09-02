@@ -25,10 +25,11 @@ export class FAFullTimeScraperService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly teamIdentityService: TeamIdentityService
+    private readonly teamIdentityService: TeamIdentityService,
+    private readonly browserServiceFactory: BrowserServiceFactory
   ) {
     // Initialize browser service based on environment
-    this.browserService = BrowserServiceFactory.create();
+    this.browserService = this.browserServiceFactory.create();
   }
 
   /**

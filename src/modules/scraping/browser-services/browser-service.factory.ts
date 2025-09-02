@@ -5,13 +5,18 @@ import { VercelPuppeteerService } from './vercel-puppeteer.service';
 
 @Injectable()
 export class BrowserServiceFactory {
-  static create(): IBrowserService {
+  constructor(
+    private readonly localService: LocalPuppeteerService,
+    private readonly vercelService: VercelPuppeteerService
+  ) {}
+
+  create(): IBrowserService {
     const mode = process.env.PUPPETEER_MODE || 'local';
     
     if (mode === 'vercel') {
-      return new VercelPuppeteerService();
+      return this.vercelService;
     } else {
-      return new LocalPuppeteerService();
+      return this.localService;
     }
   }
 }
