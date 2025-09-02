@@ -3,7 +3,7 @@ import { FAFullTimeScraperService } from './fa-fulltime-scraper.service';
 import { ScrapingController } from './scraping.controller';
 import { PrismaService } from '../../prisma.service';
 import { TeamIdentityService } from '../teams/team-identity.service';
-import { LocalPuppeteerService, VercelPuppeteerService } from './browser-services';
+import { LocalPuppeteerService, VercelPuppeteerService, BrowserServiceFactory } from './browser-services';
 
 @Module({
   controllers: [ScrapingController],
@@ -12,7 +12,8 @@ import { LocalPuppeteerService, VercelPuppeteerService } from './browser-service
     TeamIdentityService, 
     PrismaService,
     LocalPuppeteerService,
-    VercelPuppeteerService
+    VercelPuppeteerService,
+    BrowserServiceFactory
   ],
   exports: [FAFullTimeScraperService],
 })
